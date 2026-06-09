@@ -76,6 +76,7 @@ pipeline {
             steps {
                 withCredentials([string(credentialsId: 'github', variable: 'GITHUB_TOKEN')]) {
                     sh """
+                        git config --global --add safe.directory /var/lib/jenkins/workspace/java-maven-sonar-argocd
                         git config --global user.email "nimnaevz96@gmail.com"
                         git config --global user.name "nimnadev"
 
