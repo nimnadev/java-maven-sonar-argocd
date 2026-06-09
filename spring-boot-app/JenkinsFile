@@ -1,99 +1,98 @@
 pipeline {
-agent {
-    docker {
-        image 'maven-docker-agent:v1'
-        args '--user root -v /var/run/docker.sock:/var/run/docker.sock'
-    }
-}
-
-stages {
-
-    stage('Checkout') {
-        steps {
-            sh 'echo "Source code checked out successfully"'
-            sh 'pwd'
-            sh 'ls -ltr'
+    agent {
+        docker {
+            image 'maven-docker-agent:v1'
+            args '--user root -v /var/run/docker.sock:/var/run/docker.sock'
         }
     }
 
-    stage('Build and Test') {
-        steps {
-            sh '''
-                cd spring-boot-app
-                mvn clean package
-            '''
-        }
-    }
+    stages {
 
-    stage('Static Code Analysis') {
-        environment {
-            SONAR_URL = "http://54.238.224.46:9000"
+        stage('Checkout') {
+            steps {
+                sh 'echo "Source code checked out successfully"'
+                sh 'pwd'
+                sh 'ls -ltr'
+            }
         }
 
-        steps {
-            withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_AUTH_TOKEN')]) {
+        stage('Build and Test') {
+            steps {
                 sh '''
                     cd spring-boot-app
-                    mvn sonar:sonar \
-                    -Dsonar.login=$SONAR_AUTH_TOKEN \
-                    -Dsonar.host.url=$SONAR_URL
+                    mvn clean package
                 '''
             }
         }
-    }
 
-    stage('Build and Push Docker Image') {
-        environment {
-            DOCKER_IMAGE = "nimnajudy/ultimate-cicd:${BUILD_NUMBER}"
+        stage('Static Code Analysis') {
+            environment {
+                SONAR_URL = "http://54.238.224.46:9000"
+            }
+
+            steps {
+                withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_AUTH_TOKEN')]) {
+                    sh '''
+                        cd spring-boot-app
+                        mvn sonar:sonar \
+                        -Dsonar.login=$SONAR_AUTH_TOKEN \
+                        -Dsonar.host.url=$SONAR_URL
+                    '''
+                }
+            }
         }
 
-        steps {
-            script {
-                sh """
-                    cd spring-boot-app
-                    docker build -t ${DOCKER_IMAGE} .
-                """
+        stage('Build and Push Docker Image') {
+            environment {
+                DOCKER_IMAGE = "nimnajudy/ultimate-cicd:${BUILD_NUMBER}"
+            }
 
-                docker.withRegistry('https://index.docker.io/v1/', 'docker-cred') {
-                    docker.image("${DOCKER_IMAGE}").push()
+            steps {
+                script {
+                    sh """
+                        cd spring-boot-app
+                        docker build -t ${DOCKER_IMAGE} .
+                    """
+
+                    docker.withRegistry('https://index.docker.io/v1/', 'docker-cred') {
+                        docker.image("${DOCKER_IMAGE}").push()
+                    }
+                }
+            }
+        }
+
+        stage('Update Deployment File') {
+            environment {
+                GIT_REPO_NAME = "java-maven-sonar-argocd"
+                GIT_USER_NAME = "nimnadev"
+            }
+
+            steps {
+                withCredentials([string(credentialsId: 'github', variable: 'GITHUB_TOKEN')]) {
+                    sh """
+                        git config user.email "nimnaevz96@gmail.com"
+                        git config user.name "nimnadev"
+
+                        sed -i "s/replaceImageTag/${BUILD_NUMBER}/g" spring-boot-app-manifests/deployment.yml
+
+                        git add spring-boot-app-manifests/deployment.yml
+
+                        git commit -m "Update deployment image to version ${BUILD_NUMBER}" || true
+
+                        git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME}.git HEAD:main
+                    """
                 }
             }
         }
     }
 
-    stage('Update Deployment File') {
-        environment {
-            GIT_REPO_NAME = "java-maven-sonar-argocd"
-            GIT_USER_NAME = "nimnadev"
+    post {
+        success {
+            echo 'Pipeline executed successfully!'
         }
 
-        steps {
-            withCredentials([string(credentialsId: 'github', variable: 'GITHUB_TOKEN')]) {
-                sh """
-                    git config user.email "nimnaevz96@gmail.com"
-                    git config user.name "nimnadev"
-
-                    sed -i "s/replaceImageTag/${BUILD_NUMBER}/g" spring-boot-app-manifests/deployment.yml
-
-                    git add spring-boot-app-manifests/deployment.yml
-
-                    git commit -m "Update deployment image to version ${BUILD_NUMBER}" || true
-
-                    git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME}.git HEAD:main
-                """
-            }
+        failure {
+            echo 'Pipeline failed!'
         }
     }
 }
-
-post {
-    success {
-        echo 'Pipeline executed successfully!'
-    }
-
-    failure {
-        echo 'Pipeline failed!'
-    }
-}
-}
-
